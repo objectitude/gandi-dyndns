@@ -1,5 +1,24 @@
-- add init.d method?
-- cleanup the code
-- ask Gandi why version.set does not update the gui directly (takes 1 hour)
-- add local history for IP to check weither we need to use gandi rpc 
-- add checks and warnings / errors
+Logging
+	- level of logging
+	- positive information
+
+Mailing
+	- send new IP to a mail adress (if zone was updated or not)
+	- one set of e-mail addresses per record
+
+Code
+	- code clean up
+	- review usage of the exit() function desgin
+	- add configurable ttl
+	- use fqdn instead just the record in the configuration file
+
+Installation
+	- document template for configuration file
+
+Development
+	- complete the script to configure the OTE environment for testing purpose
+(I spent so much time to get it ready!)
+
+master branch
+- add init.d method? ## version@objectitude.eu ## is it needed?
+- ask Gandi why version.set does not update the gui directly (takes 1 hour) ## does not seem to be the case anymore.

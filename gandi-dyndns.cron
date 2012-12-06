@@ -1,0 +1,1 @@
+*/5 * * * * gandi-dyndns -d <domain>.<tld> -r <record>

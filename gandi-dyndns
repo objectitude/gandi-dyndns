@@ -1,155 +1,193 @@
-#!/usr/bin/python
+#! /usr/bin/python
 
-import re
 import xmlrpclib
 import getopt
-import sys
+import os
+import ConfigParser
 import urllib2
 
-api = xmlrpclib.ServerProxy('https://rpc.gandi.net/xmlrpc/')
-
 def main():
-    apikey = ''
-    domain = ''
-    record = ''
-    rtypes = []
+	version_reference = 3
+	
+	from optparse import OptionParser
+	parser = OptionParser()
+	parser.add_option('-d', '--domain', help='Specify domain')
+	parser.add_option('-r', '--record', help='Specify record data')
+	(options, arguments) = parser.parse_args()
+	
+	if len(arguments) != 0:
+		print('No argument is required.\n')
+		exit(1)
+	
+	if options.domain == None:
+		print('No domain is provided!\n')
+		exit(1)
+		
+	if options.record == None:
+		print('No record is provided!\n')
+		exit(1)
+	
+	dirPath = os.path.dirname(os.path.realpath( __file__ ))
+	configName = dirPath + '/gandi-dns.cfg'
+	if not os.path.isfile(configName):
+		print('Config file (' + configName + ') does not exist!')
+		exit(1)
+	
+	try:
+		configFile = open(configName, 'r')
+	except:
+		print('Config file (' + configName + ') can not be open with read access!')
+		exit(1)
+	
+	config = ConfigParser.ConfigParser()
+	config.readfp(configFile)
+	configFile.close()
 
-    from optparse import OptionParser
-    optp = OptionParser()
-    optp.add_option('-a', '--api',    help='Specify API key')
-    optp.add_option('-d', '--domain', help='Specify domain')
-    optp.add_option('-4', '--ipv4',   help='Enable IPv4', action='store_true')
-    optp.add_option('-6', '--ipv6',   help='Enable IPv6', action='store_true')
-    optp.add_option('-r', '--record', help='Specify record data')
-    (opts, args) = optp.parse_args()
-   
-    # Process
-    if opts.ipv4: rtypes.append('A')
-    if opts.ipv6: rtypes.append('AAAA')
-    domain = opts.domain
-    apikey = opts.api
-    record = opts.record
+	if not config.has_section('gandi'):
+		print('Section [gandi] is missing in config file ' + configName + '!')
+		exit(1)
+	if not config.has_option('gandi', 'url'):
+		print('Option url is missing in config file ' + configName + '!')
+		exit(1)
+	if not config.has_option('gandi', 'key'):
+		print('Option key is missing in config file ' + configName + '!')
+		exit(1)
+	if not config.has_section(options.record):
+		print('Section [' + options.record + '] is missing in config file ' + configName + '!')
+		exit(1)
+	if not config.has_option(options.record, 'IPv4'):
+		print('Option IPv4 is missing in config file ' + configName + ' for section [' + options.record + ']!')
+		exit(1)
+	if not config.has_option(options.record, 'IPv6'):
+		print('Option IPv6 is missing in config file ' + configName + ' for section [' + options.record + ']!')
+		exit(1)
 
-    # Default
-    if not rtypes:
-        rtypes = ['A']
+	# check if IP has changed
+	addresses = {}
+	ip = getIPv4()
+	if ip != None and ip != config.get(options.record, 'IPv4'):
+		addresses['A'] = ip
+		config.set(options.record, 'IPv4', ip)
+	else:
+		print('IPv4 has not changed!')
+	ip = getIPv6()
+	if ip != None and ip != config.get(options.record, 'IPv6'):
+		addresses['AAAA'] = ip
+		config.set(options.record, 'IPv6', ip)
+	else:
+		print('IPv6 has not changed!')
+	
+	# at least one of the addresses has changed
+	if (not 'A' in addresses) and (not 'AAAA' in addresses):
+		print('Not IP addresses have changed for record ' + options.record + '!')
+		exit(0)
+	 
+	print(str(addresses))
+	provider = gandi(config.get('gandi', 'url'), config.get('gandi', 'key'))
+	if not provider.isReady():
+		print("Gandi is not ready.\n")
+		exit(1)
+	
+	if provider.version()[0] != version_reference:
+		print('Cannot run with this version of the Gandi API\n')
+		exit(1)
+	
+	if not provider.isDomainExisting(options.domain):
+		print('Domain (' + options.domain + ') does not exist!')
+		exit(1)
+	
+	zoneInfo = zone(provider, provider.getZoneId(options.domain))
+	
+	if zoneInfo.isPublic():
+		print('Zone for domain ' + options.domain + ' is still public!')
+		exit(1)
+	
+	if not zoneInfo.isRecordExisting(options.record):
+		print('Record (' + options.record + ') does not exist!')
+		exit(1)
+	
+	types = zoneInfo.RecordTypes(options.record)
+	if ('A' in addresses and 'A' in types) or ('AAAA' in addresses or 'AAAA' in types):
+		zoneInfo.addVersion()
+		if 'A' in types:
+			zoneInfo.deleteRecord(options.record, 'A')
+			zoneInfo.addRecord(options.record, 'A', addresses['A'])
+		if 'AAAA' in types:
+			zoneInfo.deleteRecord(options.record, 'AAAA')
+			zoneInfo.addRecord(options.record, 'AAAA', addresses['AAAA'])
+		zoneInfo.setVersion()
 
-    if check_if_apikey_exists(apikey) == False:
-        print ("Apikey " + apikey + " does not exist or is malformed")
-        usage()
-        sys.exit()
+	try:
+		configFile = open(configName, 'w')
+	except:
+		print('Config file (' + configName + ') can not be open with write access!')
+		exit(1)
+	config.write(configFile)
+	configFile.close()
 
-    if check_if_domain_exists(apikey, domain) == False:
-        print ("Domain " + domain + " does not exist")
-        usage()
-        sys.exit()
+class gandi:
+	def __init__(self, url, k):
+		self.api = xmlrpclib.ServerProxy(url)
+		self.key = k
+		
+	def isReady(self):
+		try:
+			self.api.version.info(self.key)
+			return True
+		except xmlrpclib.Fault as err:
+			return False
+	
+	def version(self):
+		info = self.api.version.info(self.key)
+		components = info['api_version'].split('.')
+		return tuple([int(c) for c in components])
+		
+	def isDomainExisting(self, d):
+		try:
+			return self.api.domain.list(self.key, {'fqdn': d}) != []
+		except xmlrpclib.Fault as err:
+			return False
+	
+	def getZoneId(self, domain):
+		return self.api.domain.info(self.key, domain)['zone_id']
+		
+class zone:
+	def __init__(self, g, z):
+		self.gandi = g
+		self.id = z
+		self.version = self.gandi.api.domain.zone.info(self.gandi.key, self.id)['version']
+				
+	def isPublic(self):
+		return self.gandi.api.domain.zone.info(self.gandi.key, self.id)['public']
+		
+	def addVersion(self):
+		self.version = self.gandi.api.domain.zone.version.new(self.gandi.key, self.id)
+	
+	def setVersion(self):
+		self.gandi.api.domain.zone.version.set(self.gandi.key, self.id, self.version)
+	
+	def isRecordExisting(self, record):
+		return self.gandi.api.domain.zone.record.list(self.gandi.key, self.id, self.version, {'name': record}) != []
+		
+	def RecordTypes(self, r):
+		return [record['type'] for record in self.gandi.api.domain.zone.record.list(self.gandi.key, self.id, self.version, {'name': r})]
+	
+	def addRecord(self, record, type, value):
+		parameters = {'name': record, 'ttl': 300, 'type': type, 'value': value}
+		self.gandi.api.domain.zone.record.add(self.gandi.key, self.id, self.version, parameters)
+	
+	def deleteRecord(self, record, type):
+		parameters = {"name": record, "type": type}
+		records = self.gandi.api.domain.zone.record.delete(self.gandi.key, self.id, self.version, parameters)
 
-    addresses = {}
+def getIPv4():
+	try:
+		return urllib2.urlopen('http://api-sth01.exip.org/?call=ip').read()
+	except:
+		return None
 
-    for rtype in rtypes:
-        if check_if_record_exists(apikey, get_zoneid_by_domain(apikey, domain), record, rtype) == False:
-            print (rtype + " Record " + record + " does not exist, please create")
-            usage()
-            sys.exit()
-
-        if rtype == 'A':
-            address = get_public_ipv4()
-        elif rtype == 'AAAA':
-            address = get_public_ipv6()
-        if not address:
-            print ("Can't find address for record type '" + rtype + "'")
-            sys.exit()
-        addresses[rtype] = address
-
-    # Fetch the active zone id
-    zone_id = get_zoneid_by_domain(apikey, domain)
-    
-    # Create a new zone version for zone id
-    version_id = create_new_zone_version(apikey, zone_id)
-    
-    for rtype in rtypes:
-        # Update the record for the zone id and zone version
-        update_record(apikey, zone_id, version_id, record, rtype, addresses[rtype])
-        print record + " " + rtype + " " + addresses[rtype]
-
-    # Activate the new zone
-    api.domain.zone.version.set(apikey, zone_id, version_id)
-
-def usage():
-    print("Usage: gandi-dyndns --api=APIKEY --domain=DOMAIN --record=RECORD [--ipv4] [--ipv6]")
-
-def api_version(apikey):
-    return api.version.info(apikey)
-
-def zone_list(apikey):
-    return api.domain.zone.list(apikey)
-
-def zone_record_list(apikey, zone_id):
-    return api.domain.zone.record.list(apikey, zone_id, 0)
-
-def create_new_zone_version(apikey, zone_id):
-    return api.domain.zone.version.new(apikey, zone_id)
-
-def domain_info(apikey, domain):
-    return api.domain.info(apikey, domain)
-
-def get_zoneid_by_domain(apikey, domain):
-    return domain_info(apikey, domain)['zone_id']
-
-def get_public_ipv4():
-    try:
-        return urllib2.urlopen('http://api.externalip.net/ip/').read()
-    except:
-        return None
-
-def get_public_ipv6():
-    data = urllib2.urlopen("http://icanhazipv6.com").read()
-    matches = re.search('<p class="my_address">(.*?)</p>', data)
-    if matches:
-        return matches.group(1)
-    return None
-
-def update_record(apikey, zone_id, zone_version, record, rtype, value):
-    delete_record(apikey, zone_id, zone_version, record, rtype)
-    insert_record(apikey, zone_id, zone_version, record, rtype, value)    
-
-def delete_record(apikey, zone_id, zone_version, record, rtype):
-    recordListOptions = {"name": record,
-                         "type": rtype}
-
-    records = api.domain.zone.record.delete(apikey, zone_id, zone_version, recordListOptions)
-
-def insert_record(apikey, zone_id, zone_version, record, rtype, value):
-    zoneRecord = {"name": record, 
-                  "ttl": 300, 
-                  "type": rtype, 
-                  "value": value}
-
-    api.domain.zone.record.add(apikey, zone_id, zone_version, zoneRecord)
-
-def check_if_domain_exists(apikey, domain):
-    try:
-        api.domain.info(apikey, domain)
-        return True
-    except xmlrpclib.Fault as err:
-        return False
-
-def check_if_apikey_exists(apikey):
-    try:
-        api_version(apikey)
-        return True
-    except xmlrpclib.Fault as err:
-        return False
-
-def check_if_record_exists(apikey, zone_id, record, rtype): 
-    recordListOptions = {"name": record, 
-                         "type": rtype}
-
-    records = api.domain.zone.record.list(apikey, zone_id, 0, recordListOptions)
-    if len(records) > 0:
-        return True
-
-    return False
+def getIPv6():
+	return None
 
 if __name__ == "__main__":
     main()

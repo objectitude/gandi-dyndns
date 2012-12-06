@@ -4,8 +4,9 @@ The development of this tool or myself are in no way involved with Gandi.net.
 
 --- Requirements ---
 
-- Python (>= 2.7)
-- Python xmlrpclib 
+- Python (>= 2.7 && < 3.0)
+- Python xmlrpclib, getopt, os, ConfigParser, urllib2
+
 
 --- Gandi details ---
 
@@ -13,12 +14,13 @@ API Key (Apply here: https://www.gandi.net/admin/api_key)
 
 --- Usage ---
 
-gandi-dyndns --apikey=APIKEY --domain=DOMAIN --record=RECORD
+gandi-dns.py --domain=<domain>.<tld> --record=<record>
 
 --- Readme ---
 
-Currently very lazy but working mode. 
-Note that there is a gandi bug, as where the program updates the zone and activates it, gandi does not show this through their webinterface.
+Still working (I hope so :-). 
+Note that there is a gandi bug, as where the program updates the zone and activates it,
+gandi does not show this through their webinterface.
 I'll be contacting them to fix this.
 
 All communication is done over https.
