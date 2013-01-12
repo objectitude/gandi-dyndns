@@ -19,6 +19,9 @@ Development
 	- complete the script to configure the OTE environment for testing purpose
 (I spent so much time to get it ready!)
 
+Deployment
+	- create a package for Debian/Ubuntu distribution.
+
 master branch
 - add init.d method? ## version@objectitude.eu ## is it needed?
 - ask Gandi why version.set does not update the gui directly (takes 1 hour) ## does not seem to be the case anymore.
